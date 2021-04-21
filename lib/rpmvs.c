@@ -519,6 +519,7 @@ static const char * rpmSigString(rpmRC res)
     case RPMRC_OK:		str = "OK";		break;
     case RPMRC_FAIL:		str = "BAD";		break;
     case RPMRC_NOKEY:		str = "NOKEY";		break;
+    case RPMRC_BADKEY:		str = "BADKEY";		break;
     case RPMRC_NOTTRUSTED:	str = "NOTTRUSTED";	break;
     case RPMRC_NOTFOUND:	str = "NOTFOUND";	break;
     default:			str = "UNKNOWN";	break;

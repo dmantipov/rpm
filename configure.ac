@@ -519,6 +519,27 @@ if test "x$have_sqlite" = "xyes"; then
 fi
 AM_CONDITIONAL([SQLITE], [test "x$have_sqlite" = "xyes"])
 
+# Check for RNP crypto library
+AC_ARG_ENABLE([librnp],
+              [AS_HELP_STRING([--enable-librnp=@<:@yes/no/auto@:>@)],
+                              [use RNP library for key validation (default=yes)])],
+              [enable_librnp="$enableval"],
+              [enable_librnp=yes])
+
+AS_IF([test "x$enable_librnp" != "xno"], [
+  PKG_CHECK_MODULES([LIBRNP], [librnp], [have_librnp=yes], [have_librnp=no])
+  AS_IF([test "$enable_librnp" = "yes"], [
+    if test "$have_librnp" = "no"; then
+      AC_MSG_ERROR([--enable-librnp specified, but not available])
+    fi
+  ])
+])
+
+if test "x$have_librnp" = "xyes"; then
+  AC_DEFINE([WITH_LIBRNP], [1], [Use RNP library for key validation])
+fi
+AM_CONDITIONAL([LIBRNP], [test "x$have_librnp" = "xyes"])
+
 AM_GNU_GETTEXT_VERSION([0.18.2])
 AM_GNU_GETTEXT([external])
 AM_ICONV

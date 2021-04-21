@@ -9,6 +9,11 @@
 #include <rpm/rpmkeyring.h>
 #include <rpm/rpmbase64.h>
 
+#ifdef WITH_LIBRNP
+#include <rnp/rnp.h>
+#include <rnp/rnp_err.h>
+#endif /* WITH_LIBRNP */
+
 #include "rpmio/digest.h"
 
 #include "debug.h"
@@ -21,6 +26,9 @@ struct rpmPubkey_s {
     pgpKeyID_t keyid;
     pgpDigParams pgpkey;
     int nrefs;
+#ifdef WITH_LIBRNP
+    _Bool valid;
+#endif /* WITH_LIBRNP */
     pthread_rwlock_t lock;
 };
 
@@ -29,6 +37,11 @@ struct rpmKeyring_s {
     size_t numkeys;
     int nrefs;
     pthread_rwlock_t lock;
+#ifdef WITH_LIBRNP
+    size_t count;
+    rnp_ffi_t rnp;
+    rnp_input_t input;
+#endif /* WITH_LIBRNP */
 };
 
 static int keyidcmp(const void *k1, const void *k2)
@@ -45,6 +58,12 @@ rpmKeyring rpmKeyringNew(void)
     keyring->keys = NULL;
     keyring->numkeys = 0;
     keyring->nrefs = 1;
+#ifdef WITH_LIBRNP
+    if (rnp_ffi_create(&keyring->rnp, "GPG", "GPG") != RNP_SUCCESS) {
+	free(keyring);
+	return NULL;
+    }
+#endif /* WITH_LIBRNP */
     pthread_rwlock_init(&keyring->lock, NULL);
     return keyring;
 }
@@ -62,6 +81,11 @@ rpmKeyring rpmKeyringFree(rpmKeyring keyring)
 	    }
 	    free(keyring->keys);
 	}
+#ifdef WITH_LIBRNP
+	rnp_ffi_destroy(keyring->rnp);
+	if (keyring->input)
+	    rnp_input_destroy(keyring->input);
+#endif /* WITH_LIBRNP */
 	pthread_rwlock_unlock(&keyring->lock);
 	pthread_rwlock_destroy(&keyring->lock);
 	free(keyring);
@@ -81,6 +105,52 @@ static rpmPubkey rpmKeyringFindKeyid(rpmKeyring keyring, rpmPubkey key)
     return found ? *found : NULL;
 }
 
+#ifdef WITH_LIBRNP
+static int rpmKeyringCheckKey(rpmKeyring keyring, rpmPubkey key)
+{
+    size_t n;
+    int rc = 1;
+    char *keyid, *text;
+    rnp_key_handle_t handle;
+
+    if (!keyring->input) {
+	/* This code assumes that the main key comes first. */
+	if (rnp_input_from_memory(&keyring->input, key->pkt,
+				  key->pktlen, 1) != RNP_SUCCESS)
+	    return -1;
+	if (rnp_load_keys(keyring->rnp, "GPG", keyring->input,
+			  RNP_LOAD_SAVE_PUBLIC_KEYS) != RNP_SUCCESS)
+	    return -1;
+	if (rnp_get_public_key_count(keyring->rnp,
+				     &keyring->count) != RNP_SUCCESS)
+	    return -1;
+    }
+
+    /* RNP API uses hex-encoded key IDs. */
+    text = pgpHexStr(key->keyid, sizeof(key->keyid));
+
+    /* Lookup by key ID and check whether the key is valid. */
+    for (n = 0; n < keyring->count; n++) {
+	rnp_get_public_key_at(keyring->rnp, n, &handle);
+	rnp_key_get_keyid(handle, &keyid);
+
+	/* RNP uses uppercase in hex-encoding vs. lowercase in RPM. */
+	if (!strcasecmp(keyid, text)) {
+	    rnp_key_is_valid(handle, &key->valid);
+	    rpmlog(RPMLOG_DEBUG, "mark key %s as %s\n",
+		   text, (key->valid ? "valid" : "invalid"));
+	    rc = 0;
+	}
+	rnp_key_handle_destroy(handle);
+	free(keyid);
+	if (rc == 0)
+	    break;
+    }
+    free(text);
+    return rc;
+}
+#endif /* WITH_LIBRNP */
+
 int rpmKeyringAddKey(rpmKeyring keyring, rpmPubkey key)
 {
     int rc = 1; /* assume already seen key */
@@ -96,7 +166,11 @@ int rpmKeyringAddKey(rpmKeyring keyring, rpmPubkey key)
 	keyring->numkeys++;
 	qsort(keyring->keys, keyring->numkeys, sizeof(*keyring->keys),
 		keyidcmp);
+#ifdef WITH_LIBRNP
+	rc = rpmKeyringCheckKey(keyring, key);
+#else /* not LIBRNP */
 	rc = 0;
+#endif /* WITH_LIBRNP */
     }
     pthread_rwlock_unlock(&keyring->lock);
 
@@ -328,6 +402,12 @@ rpmRC rpmKeyringVerifySig(rpmKeyring keyring, pgpDigParams sig, DIGEST_CTX ctx)
 
 	/* We call verify even if key not found for a signature sanity check */
 	rc = pgpVerifySignature(pgpkey, sig, ctx);
+
+#ifdef WITH_LIBRNP
+	/* Ignore the result if key is not valid. */
+	if (key && !key->valid)
+	    rc = RPMRC_BADKEY;
+#endif /* WITH_LIBRNP */
     }
 
     if (keyring)

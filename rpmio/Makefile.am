@@ -42,6 +42,7 @@ librpmio_la_LIBADD = \
 	@WITH_ZLIB_LIB@ \
 	@WITH_POPT_LIB@ \
 	@WITH_LZMA_LIB@ \
+	@LIBRNP_LIBS@ \
 	@LUA_LIBS@ \
 	../luaext/libluaext.la \
 	$(ZSTD_LIBS) \

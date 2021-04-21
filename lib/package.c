@@ -162,8 +162,13 @@ static int handleHdrVS(struct rpmsinfo_s *sinfo, void *cbdata)
     if (sinfo->rc && pkgdata->rc != RPMRC_FAIL)
 	pkgdata->rc = sinfo->rc;
 
+#ifdef WITH_LIBRNP
+    /* Refuse installation if invalid key is detected. */
+    if (sinfo->rc != RPMRC_FAIL && sinfo->rc != RPMRC_BADKEY)
+#else /* not RNP */
     /* Preserve traditional behavior for now: only failure prevents read */
     if (sinfo->rc != RPMRC_FAIL)
+#endif /* WITH_LIBRNP */
 	sinfo->rc = RPMRC_OK;
 
     return 1;
